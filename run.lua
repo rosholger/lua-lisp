@@ -1,3 +1,6 @@
+local profile = require('profile')
+local lex_setup = require('lang.lexer')
+local reader = require('lang.reader')
 local function usage()
   io.stderr:write[[
 LuaJIT Language Toolkit usage: luajit [options]... [script [args]...].
@@ -61,14 +64,38 @@ end
 
 if not filename then usage() end
 
+function dump(o)
+    if type(o) == 'table' and getmetatable(o) ~= symbol_metatable and getmetatable(o) ~= conscell_metatable then
+        local s = '{ '
+        for k,v in pairs(o) do
+            if type(k) ~= 'number' then k = '"'..k..'"' end
+            s = s .. '['..k..'] = ' .. dump(v) .. ','
+        end
+        return s .. '} '
+    elseif type(o) == 'string' then
+        return '"' .. o .. '"'
+    else
+        return tostring(o)
+    end
+end
+ogprint = print
+
+profile.start()
+require("lang.prelude")
+profile.stop()
 local compile = require("lang.compile")
 
 -- Compute the bytecode string for the given filename.
-local luacode = check(compile.file(filename, opt))
-if opt.debug then
-    print(luacode)
-    print('\n\nOutput:')
-end
-local fn = assert(loadstring(luacode))
-fn()
 
+local ls = lex_setup(reader.file(filename), filename)
+while ls.token ~= "TK_eof" do
+    print = function (...) end
+    profile.start()
+    local luacode = compile.compile(ls, filename, opt)
+    profile.stop()
+    local fn = assert(loadstring(luacode))
+    ogprint(dump(fn()))
+    print = ogprint
+    ls:next()
+end
+print(profile.report(10))

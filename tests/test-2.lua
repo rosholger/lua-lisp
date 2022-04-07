@@ -1,4 +1,1 @@
-local k = "foo"
-k = tonumber(k) and "foo" or k
-print("K", k)
-
+return (function (a) return 1 end)

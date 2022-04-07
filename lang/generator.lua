@@ -898,6 +898,14 @@ function StatementRule:Chunk(node, name)
     self:close_proto()
 end
 
+function StatementRule:Literal(node, name)
+    -- Ignore it
+end
+
+function StatementRule:Identifier(node, name)
+    -- Ignore it, or maybe we should transform it into an assert for nil?
+end
+
 local function generate(tree, name)
     local self = { line = 0 }
     self.main = bc.Proto.new(bc.Proto.VARARG, tree.firstline, tree.lastline)
@@ -945,7 +953,7 @@ local function generate(tree, name)
     function self:emit(node, ...)
         if node.line then self.ctx:line(node.line) end
         local rule = StatementRule[node.kind]
-        if not rule then error("cannot find a statement rule for " .. node.kind) end
+        if not rule then error("cannot find a statement rule for " .. node.kind .. " line " .. (node.line or "unknown")) end
         rule(self, node, ...)
     end
 
@@ -1041,7 +1049,7 @@ local function generate(tree, name)
                 mov_toreg(self.ctx, dest, base)
                 return tailcall
             else
-                error("Cannot find an ExpressionRule for " .. node.kind)
+                error("Cannot find an ExpressionRule for " .. node.kind .. " line " .. node.line)
             end
         end
         return false -- no tail call

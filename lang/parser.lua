@@ -1,3 +1,4 @@
+--[[
 local operator = require("lang.operator")
 
 local LJ_52 = false
@@ -352,7 +353,7 @@ local function parse_local(ast, ls)
     end
 end
 
-local function parse_func(ast, ls, line)
+    local function parse_func(ast, ls, line) 20)
     local needself = false
     ls:next() -- Skip 'function'.
     -- Parse function name.
@@ -561,6 +562,57 @@ local function parse(ast, ls)
         err_token(ls, 'TK_eof')
     end
     return chunk
+end
+]]
+
+local function parse(ast, ls)
+    print("Trace: parse, token = " .. ls.token)
+    if ls.token == '(' then
+        print("Trace: start of list")
+        local firstLine = ls.linenumber
+        local elements = {}
+        ls:next()
+        while ls.token ~= ')' do
+            print("Trace: before recursing")
+            elements[#elements+1] = parse(ast, ls)
+            ls:next()
+            print("Trace: after recursing, token = " .. ls.token)
+        end
+        print("Trace: end of list")
+        return ast.list(elements, firstLine)
+    elseif ls.token == 'TK_name' then
+        print("Trace: symbol")
+        local symbol = ast.identifier(ls.tokenval, ls.linenumber)
+        return symbol
+    elseif ls.token == 'TK_number' then
+        print("Trace: number")
+        local number = ast.number(ls.tokenval, ls.linenumber)
+        return number
+    elseif ls.token == "TK_string" then
+        print("Trace: string")
+        local str = ast.string(ls.tokenval, ls.linenumber)
+        return str
+    elseif ls.token == "'" then
+        local elements = {ast.identifier("quote", ls.linenumber)}
+        ls:next()
+        elements[2] = parse(ast, ls)
+        return ast.list(elements, elements[1].line)
+    elseif ls.token == "`" then
+        local elements = {ast.identifier("quasiquote", ls.linenumber)}
+        ls:next()
+        elements[2] = parse(ast, ls)
+        return ast.list(elements, elements[1].line)
+    elseif ls.token == ',' then
+        local elements = {ast.identifier("unquote", ls.linenumber)}
+        ls:next()
+        elements[2] = parse(ast, ls)
+        return ast.list(elements, elements[1].line)
+    elseif ls.token == ',@' then
+        local elements = {ast.identifier("unquote-splice", ls.linenumber)}
+        ls:next()
+        elements[2] = parse(ast, ls)
+        return ast.list(elements, elements[1].line)
+    end
 end
 
 return parse

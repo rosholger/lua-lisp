@@ -9,12 +9,12 @@ local ASCII_A, ASCII_Z = 65, 90
 
 local END_OF_STREAM = -1
 
-local ReservedKeyword = {['and'] = 1, ['break'] = 2, ['do'] = 3, ['else'] = 4, ['elseif'] = 5, ['end'] = 6, ['false'] = 7, ['for'] = 8, ['function'] = 9, ['goto'] = 10, ['if'] = 11, ['in'] = 12, ['local'] = 13, ['nil'] = 14, ['not'] = 15, ['or'] = 16, ['repeat'] = 17, ['return'] = 18, ['then'] = 19, ['true'] = 20, ['until'] = 21, ['while'] = 22 }
-
 local uint64, int64 = ffi.typeof('uint64_t'), ffi.typeof('int64_t')
 local complex = ffi.typeof('complex')
 
 local TokenSymbol = { TK_ge = '>=', TK_le = '<=' , TK_concat = '..', TK_eq = '==', TK_ne = '~=', TK_eof = '<eof>' }
+
+local singleSymbolTokens = { ["'"] = 1, ["`"] = 2, ["("] = 3, [")"] = 4, ["["] = 5, ["]"] = 6, ["{"] = 7, ["}"] = 8}
 
 local function token2str(tok)
     if string.match(tok, "^TK_") then
@@ -43,17 +43,19 @@ local function lex_error(ls, token, em, ...)
     error_lex(ls.chunkname, tok, ls.linenumber, em, ...)
 end
 
+local function char_isspace(c)
+    local b = strbyte(c)
+    return b >= 9 and b <= 13 or b == 32
+end
+
 local function char_isident(c)
     if type(c) == 'string' then
-        local b = strbyte(c)
-        if b >= ASCII_0 and b <= ASCII_9 then
-            return true
-        elseif b >= ASCII_a and b <= ASCII_z then
-            return true
-        elseif b >= ASCII_A and b <= ASCII_Z then
-            return true
+        if char_isspace(c) then
+            return false
+        elseif singleSymbolTokens[c] then
+            return false
         else
-            return (c == '_')
+            return true
         end
     end
     return false
@@ -65,11 +67,6 @@ local function char_isdigit(c)
         return b >= ASCII_0 and b <= ASCII_9
     end
     return false
-end
-
-local function char_isspace(c)
-    local b = strbyte(c)
-    return b >= 9 and b <= 13 or b == 32
 end
 
 local function byte(ls, n)
@@ -373,72 +370,28 @@ local function llex(ls)
     resetbuf(ls)
     while true do
         local current = ls.current
-        if char_isident(current) then
-            if char_isdigit(current) then -- Numeric literal.
-                return 'TK_number', lex_number(ls)
-            end
-            repeat
-                save_and_next(ls)
-            until not char_isident(ls.current)
-            local s = get_string(ls, 0, 0)
-            local reserved = ReservedKeyword[s]
-            if reserved then
-                return 'TK_' .. s
-            else
-                return 'TK_name', s
-            end
-        end
         if current == '\n' or current == '\r' then
             inclinenumber(ls)
         elseif current == ' ' or current == '\t' or current == '\b' or current == '\f' then
             savespace_and_next(ls)
             -- nextchar(ls)
-        elseif current == '-' then
+        elseif current == ';' then
+            skip_line(ls)
+        elseif singleSymbolTokens[current] then
             nextchar(ls)
-            if ls.current ~= '-' then return '-' end
-            -- else is a comment
+            return current
+        elseif current == ',' then
             nextchar(ls)
-            spaceadd(ls, '--')
-            if ls.current == '[' then
-                local sep = skip_sep(ls)
-                resetbuf_tospace(ls) -- `skip_sep' may dirty the buffer
-                if sep >= 0 then
-                    read_long_string(ls, sep, false) -- long comment
-                    resetbuf_tospace(ls)
-                else
-                    skip_line(ls)
-                end
+            if ls.current == '@' then
+                nextchar(ls)
+                return ',@'
             else
-                skip_line(ls)
+                return ','
             end
-        elseif current == '[' then
-            local sep = skip_sep(ls)
-            if sep >= 0 then
-                local str = read_long_string(ls, sep, true)
-                return 'TK_string', str
-            elseif sep == -1 then
-                return '['
-            else
-                lex_error(ls, 'TK_string', "delimiter error")
-            end
-        elseif current == '=' then
-            nextchar(ls)
-            if ls.current ~= '=' then return '=' else nextchar(ls); return 'TK_eq' end
-        elseif current == '<' then
-            nextchar(ls)
-            if ls.current ~= '=' then return '<' else nextchar(ls); return 'TK_le' end
-        elseif current == '>' then
-            nextchar(ls)
-            if ls.current ~= '=' then return '>' else nextchar(ls); return 'TK_ge' end
-        elseif current == '~' then
-            nextchar(ls)
-            if ls.current ~= '=' then return '~' else nextchar(ls); return 'TK_ne' end
-        elseif current == ':' then
-            nextchar(ls)
-            if ls.current ~= ':' then return ':' else nextchar(ls); return 'TK_label' end
-        elseif current == '"' or current == "'" then
+        elseif current == '"' then
             local str = read_string(ls, current)
             return 'TK_string', str
+        -- TODO
         elseif current == '.' then
             save_and_next(ls)
             if ls.current == '.' then
@@ -453,11 +406,22 @@ local function llex(ls)
             else
                 return 'TK_number', lex_number(ls)
             end
+        elseif char_isident(current) then
+            repeat
+                save_and_next(ls)
+            until not char_isident(ls.current)
+            local s = get_string(ls, 0, 0)
+            local number = tonumber(s)
+            if number then
+                return 'TK_number', number
+            else
+                return 'TK_name', s
+            end
         elseif current == END_OF_STREAM then
             return 'TK_eof'
         else
             nextchar(ls)
-            return current -- Single-char tokens (+ - / ...).
+            return "ERROR"
         end
     end
 end
@@ -468,6 +432,7 @@ local Lexer = {
 }
 
 function Lexer.next(ls)
+
     ls.lastline = ls.linenumber
     if ls.tklookahead == 'TK_eof' then -- No lookahead token?
         ls.token, ls.tokenval = llex(ls) -- Get nextchar token.
@@ -515,7 +480,9 @@ local function lex_setup(read_func, chunkname)
         inclinenumber(ls)
         header = true
     end
-    return setmetatable(ls, LexerClass)
+    local ret = setmetatable(ls, LexerClass)
+    ret:next()
+    return ret
 end
 
 return lex_setup
